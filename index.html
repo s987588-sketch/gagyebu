@@ -498,6 +498,8 @@ function mergeFiles(map){
  S=b;normalize();
 }
 let accessToken='',tokenExp=0;
+try{const k=JSON.parse(localStorage.getItem('gagyebu.tok')||'null');if(k&&k.exp>Date.now()+60000){accessToken=k.t;tokenExp=k.exp}}catch(e){}
+const clearTok=()=>{accessToken='';tokenExp=0;try{localStorage.removeItem('gagyebu.tok')}catch(e){}};
 function loadGsi(){return new Promise((res,rej)=>{if(window.google&&google.accounts&&google.accounts.oauth2)return res();const s=document.createElement('script');s.src='https://accounts.google.com/gsi/client';s.onload=res;s.onerror=()=>rej(new Error('구글 로그인 스크립트를 불러오지 못했어요 (인터넷 연결 확인)'));document.head.appendChild(s)})}
 async function getToken(interactive){
  if(accessToken&&Date.now()<tokenExp-60000)return accessToken;
@@ -505,7 +507,7 @@ async function getToken(interactive){
  await loadGsi();
  return new Promise((res,rej)=>{
   const tc=google.accounts.oauth2.initTokenClient({client_id:SY.clientId,scope:'https://www.googleapis.com/auth/drive.file',
-   callback:r=>{if(r.error)return rej(new Error('로그인 실패: '+r.error));accessToken=r.access_token;tokenExp=Date.now()+(+r.expires_in||3600)*1000;res(accessToken)},
+   callback:r=>{if(r.error)return rej(new Error('로그인 실패: '+r.error));accessToken=r.access_token;tokenExp=Date.now()+(+r.expires_in||3600)*1000;try{localStorage.setItem('gagyebu.tok',JSON.stringify({t:accessToken,exp:tokenExp}))}catch(e){}res(accessToken)},
    error_callback:e=>rej(new Error('로그인이 필요해요 ('+((e&&e.type)||'취소')+')'))});
   tc.requestAccessToken({prompt:interactive?'':'none'});
  });
@@ -513,7 +515,7 @@ async function getToken(interactive){
 async function dapi(path,opt={}){
  const t=await getToken(false);
  const r=await fetch('https://www.googleapis.com/'+path,{...opt,headers:{Authorization:'Bearer '+t,...(opt.headers||{})}});
- if(r.status===401){accessToken='';throw new Error('로그인이 만료됐어요')}
+ if(r.status===401){clearTok();throw new Error('로그인이 만료됐어요')}
  if(!r.ok)throw new Error('드라이브 오류 '+r.status);
  return r;
 }
@@ -583,10 +585,17 @@ async function connectDrive(){
 function disconnectDrive(){
  if(!confirm('연동을 해제할까요? 드라이브의 파일은 그대로 남고, 이 기기 데이터도 유지돼요.'))return;
  try{if(accessToken&&window.google)google.accounts.oauth2.revoke(accessToken,()=>{})}catch(e){}
- accessToken='';SY.enabled=false;SY.status='local';persistSY();paint();render();
+ clearTok();SY.enabled=false;SY.status='local';persistSY();paint();render();
 }
 async function syncNow(){try{await getToken(true);SY.dirty=true;await push();if(SY.status==='ok'){const r=await pull();applyRemote(r);SY.status='ok';render()}}catch(e){SY.status='err';SY.err=e.message}paint()}
-async function syncPillTap(){if(!SY.enabled)return;if(SY.status==='needLogin'||SY.status==='wait'||SY.status==='err'){try{await getToken(true);await syncStart()}catch(e){SY.status='needLogin';SY.err=e.message}paint()}else go('set')}
+let reconnecting=false,autoTried=false;
+async function reconnect(){if(reconnecting)return;reconnecting=true;try{await getToken(true);await syncStart()}catch(e){SY.status='needLogin';SY.err=e.message}reconnecting=false;paint()}
+function syncPillTap(){if(!SY.enabled)return;if(SY.status==='needLogin'||SY.status==='wait'||SY.status==='err')reconnect();else go('set')}
+// 로그인이 풀린 채로 열었을 때: 처음 누르는 곳에서 자동으로 다시 연결
+document.addEventListener('click',()=>{if(!autoTried&&SY.enabled&&(SY.status==='needLogin'||SY.status==='wait')){autoTried=true;reconnect()}},true);
+// 인터넷 복구, 앱 복귀 시 못 올린 변경 자동 재시도
+window.addEventListener('online',()=>{if(SY.enabled&&SY.dirty&&SY.status!=='needLogin'&&!pushing)push()});
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&SY.enabled&&SY.dirty&&SY.status!=='needLogin'&&!pushing)push()});
 async function initSync(){
  paint();if(!SY.enabled||!SY.clientId)return;
  try{await getToken(false);await syncStart()}catch(e){SY.status='needLogin';SY.err=e.message;paint()}
