@@ -414,8 +414,8 @@ function saveTx(id,ty){
  if(ty==='exp'&&ymOf(v.date)===ymOf(today())){const a=alerts(ymOf(v.date));if(a)setTimeout(()=>alert(a.replace(/<[^>]+>/g,'\n').replace(/\n+/g,'\n').trim()),50)}
 }
 
-// 1금융권(은행법상 은행) 목록: 시중·특수·지방·인터넷전문은행
-const BANKS=['KB국민은행','신한은행','우리은행','하나은행','SC제일은행','한국씨티은행','NH농협은행','IBK기업은행','KDB산업은행','SH수협은행','iM뱅크','부산은행','경남은행','광주은행','전북은행','제주은행','카카오뱅크','케이뱅크','토스뱅크'];
+// 은행 선택 목록: 시중·특수·지방·인터넷전문은행 + 새마을금고
+const BANKS=['KB국민은행','신한은행','우리은행','하나은행','SC제일은행','한국씨티은행','NH농협은행','IBK기업은행','KDB산업은행','SH수협은행','iM뱅크','부산은행','경남은행','광주은행','전북은행','제주은행','카카오뱅크','케이뱅크','토스뱅크','새마을금고'];
 const bankSel=v=>`<select id="a_k"><option value="">선택 안 함</option>${(v&&!BANKS.includes(v)?[v]:[]).concat(BANKS).map(b=>`<option ${b===v?'selected':''}>${esc(b)}</option>`).join('')}</select>`;
 function openAcc(id){
  const a=S.accounts.find(x=>x.id===id)||{name:'',bank:'',purpose:'',base:0};
