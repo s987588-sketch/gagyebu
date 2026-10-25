@@ -414,9 +414,12 @@ function saveTx(id,ty){
  if(ty==='exp'&&ymOf(v.date)===ymOf(today())){const a=alerts(ymOf(v.date));if(a)setTimeout(()=>alert(a.replace(/<[^>]+>/g,'\n').replace(/\n+/g,'\n').trim()),50)}
 }
 
+// 1금융권(은행법상 은행) 목록: 시중·특수·지방·인터넷전문은행
+const BANKS=['KB국민은행','신한은행','우리은행','하나은행','SC제일은행','한국씨티은행','NH농협은행','IBK기업은행','KDB산업은행','SH수협은행','iM뱅크','부산은행','경남은행','광주은행','전북은행','제주은행','카카오뱅크','케이뱅크','토스뱅크'];
+const bankSel=v=>`<select id="a_k"><option value="">선택 안 함</option>${(v&&!BANKS.includes(v)?[v]:[]).concat(BANKS).map(b=>`<option ${b===v?'selected':''}>${esc(b)}</option>`).join('')}</select>`;
 function openAcc(id){
  const a=S.accounts.find(x=>x.id===id)||{name:'',bank:'',purpose:'',base:0};
- modal(`<h1>${id?'통장 수정':'통장 추가'}</h1>${fld('이름',txt('a_n',a.name,'예: 하나 주거래'))}${fld('은행',txt('a_k',a.bank,'예: 하나은행'))}${fld('용도',txt('a_p',a.purpose,'예: 생활비 / 비상금 / 여행'))}${fld('기초 잔액',num('a_b',a.base))}${foot(id,`saveAcc('${id||''}')`,`rm('accounts','${id}')`)}`);
+ modal(`<h1>${id?'통장 수정':'통장 추가'}</h1>${fld('이름',txt('a_n',a.name,'예: 하나 주거래'))}${fld('은행',bankSel(a.bank))}${fld('용도',txt('a_p',a.purpose,'예: 생활비 / 비상금 / 여행'))}${fld('기초 잔액',num('a_b',a.base))}${foot(id,`saveAcc('${id||''}')`,`rm('accounts','${id}')`)}`);
 }
 function saveAcc(id){const n=$('a_n').value.trim();if(!n)return;upsert('accounts',id,{name:n,bank:$('a_k').value.trim(),purpose:$('a_p').value.trim(),base:+$('a_b').value||0});done()}
 
