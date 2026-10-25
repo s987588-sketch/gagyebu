@@ -21,7 +21,7 @@ jobs:
       - name: Collect site files
         run: |
           mkdir site
-          cp index.html manifest.webmanifest icon.svg site/
+          cp index.html manifest.webmanifest icon.svg *.png site/
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
