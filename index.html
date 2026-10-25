@@ -194,9 +194,11 @@ function applyRecurring(){
 }
 
 function render(){
+ const y=window.scrollY;
  const nav=[['home','wallet','예산'],['list','receipt','내역'],['stats','chart','통계'],['assets','bank','자산'],['set','sliders','관리']];
  $('nav').innerHTML=nav.map(([k,i,l])=>`<button class="${tab===k?'on':''}" onclick="go('${k}')"><b>${ic(i,22)}</b>${l}</button>`).join('');
  $('app').innerHTML=({home:vHome,list:vList,stats:vStats,assets:vAssets,set:vSet})[tab]();
+ if(y)scrollTo(0,y);
 }
 const go=t=>{tab=t;render();scrollTo(0,0)};
 const monthBar=()=>`<div class="row sp"><button class="btn ghost sm" onclick="viewYm=shiftYm(viewYm,-1);render()">◀</button><b>${ymLabel(viewYm)}</b><button class="btn ghost sm" onclick="viewYm=shiftYm(viewYm,1);render()">▶</button></div>`;
@@ -402,11 +404,14 @@ function aInv(){
 }
 
 // ---- 관리 ----
+const OPEN={};
+const secOpen=(k,def)=>k in OPEN?OPEN[k]:def;
+function toggleSec(k,o){OPEN[k]=o}
 function syncSec(){
- return `<details class="card" ${SY.enabled?'':'open'}><summary><span>${ic('cloud',18,'in')} 구글 드라이브 연동</span></summary>${syncPanel()}</details>`;
+ return `<details class="card" data-k="sync" ${secOpen('sync',!SY.enabled)?'open':''} ontoggle="toggleSec(this.dataset.k,this.open)"><summary><span>${ic('cloud',18,'in')} 구글 드라이브 연동</span></summary>${syncPanel()}</details>`;
 }
 function vSet(){
- const sec=(title,add,body)=>`<details class="card"><summary><span>${title}</span></summary>${add?`<div style="margin-bottom:6px"><button class="btn sm" onclick="${add}">+ 추가</button></div>`:''}${body}</details>`;
+ const sec=(title,add,body)=>{const k=title.replace(/<[^>]+>/g,'').trim();return `<details class="card" data-k="${esc(k)}" ${secOpen(k,false)?'open':''} ontoggle="toggleSec(this.dataset.k,this.open)"><summary><span>${title}</span></summary>${add?`<div style="margin-bottom:6px"><button class="btn sm" onclick="${add}">+ 추가</button></div>`:''}${body}</details>`};
  return `<h2>관리</h2>
  ${syncSec()}
  ${sec(ic('repeat',18,'in')+' 고정 지출 (매월 자동 입력)','openRec()',S.recurring.length?S.recurring.map(r=>`<div class="item" onclick="openRec('${r.id}')"><div class="ico">${ic('repeat')}</div><div class="grow">${esc(r.name)}<div class="sub">매월 ${r.day}일 · ${esc(cat(r.cat).name)} · ${esc(cardName(r.card))}</div></div><b class="exp">${won(r.amount)}</b></div>`).join(''):'<div class="empty">월세, 구독료, 카드값 등을 등록하면<br>매월 자동 입력돼요</div>')}
