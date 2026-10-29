@@ -57,7 +57,7 @@ label{display:block;font-size:12px;color:var(--sub);margin:10px 0 4px}
 .chips span.on{color:#fff;font-weight:600}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
 .empty{text-align:center;color:var(--sub);padding:24px 0}
-.tag{font-size:11px;background:var(--line);border-radius:8px;padding:1px 7px;color:var(--sub);margin-left:4px;font-weight:400}
+.tag{white-space:nowrap;font-size:11px;background:var(--line);border-radius:8px;padding:1px 7px;color:var(--sub);margin-left:4px;font-weight:400}
 .ycols{display:flex;gap:3px}.ycol{flex:1;text-align:center;border-radius:8px;padding:2px 0;cursor:pointer}.ycol.sel{background:var(--bg)}
 .yplot{position:relative;display:flex;align-items:flex-end;justify-content:center}.yplot em{display:block;width:68%;border-radius:6px 6px 0 0}
 .yplot u{position:absolute;left:0;right:0;border-top:2px dashed var(--acc);opacity:.6}
@@ -172,8 +172,25 @@ const portion=(t,i)=>{const n=t.months||1;if(n<=1)return t.amount;const p=Math.r
 function charges(ym){const out=[];S.tx.forEach(t=>{if(t.type!=='exp')return;const n=t.months||1,off=monthDiff(ymOf(t.date),ym);if(off>=0&&off<n)out.push({...t,amount:portion(t,off),inst:n>1?(off+1)+'/'+n:'',date:off?ym+'-'+String(Math.min(+t.date.slice(8),daysIn(ym))).padStart(2,'0'):t.date})});return out}
 const expOf=charges;
 const incOf=ym=>S.tx.filter(t=>t.type==='inc'&&ymOf(t.date)===ym);
-const paidSum=t=>{const n=t.months||1;if(n<=1)return t.amount;const k=Math.min(n,Math.max(0,monthDiff(ymOf(t.date),ymOf(today())))+1);let s=0;for(let i=0;i<k;i++)s+=portion(t,i);return s};
-const accBal=a=>a.base+sum(S.tx.filter(t=>t.account===a.id),t=>t.type==='inc'?t.amount:-paidSum(t))-sum(S.deposits.filter(d=>d.account===a.id),amt)-sum(S.repays.filter(r=>r.account===a.id),amt);
+// 신용카드 + 결제일 입력 시: 사용한 달의 다음 달 결제일에 통장에서 차감 (결제일이 없으면 사용 즉시 차감)
+const deferredCard=c=>!!c&&c.kind==='신용'&&+c.payDay>0;
+const deferredTx=t=>t.type==='exp'&&deferredCard(cardOf(t.card));
+const payDate=(c,ym)=>{const m=shiftYm(ym,1);return m+'-'+String(Math.min(+c.payDay,daysIn(m))).padStart(2,'0')};
+const usedParts=t=>Math.min(t.months||1,Math.max(0,monthDiff(ymOf(t.date),ymOf(today())))+1);
+const usedSum=t=>{const k=usedParts(t);let s=0;for(let i=0;i<k;i++)s+=portion(t,i);return s};
+const paidSum=usedSum;
+const settledSum=t=>{if(!deferredTx(t))return usedSum(t);const c=cardOf(t.card),k=usedParts(t),td=today();let s=0;for(let i=0;i<k;i++)if(payDate(c,shiftYm(ymOf(t.date),i))<=td)s+=portion(t,i);return s};
+const accBal=a=>a.base+sum(S.tx.filter(t=>t.account===a.id),t=>t.type==='inc'?t.amount:-settledSum(t))-sum(S.deposits.filter(d=>d.account===a.id),amt)-sum(S.repays.filter(r=>r.account===a.id),amt);
+const accUnpaid=a=>sum(S.tx.filter(t=>t.account===a.id&&deferredTx(t)),t=>usedSum(t)-settledSum(t));
+// ym 월에 통장에서 빠지는 신용카드 대금 (전월 사용분)
+function cardPays(ym){
+ const prev=shiftYm(ym,-1),by={};
+ charges(prev).filter(deferredTx).forEach(t=>{const k=t.card+'|'+t.account;by[k]=by[k]||{card:t.card,account:t.account,amount:0};by[k].amount+=t.amount});
+ return Object.values(by).map(o=>({...o,prev,date:payDate(cardOf(o.card),prev)}));
+}
+const nextMonthPay=ym=>sum(charges(ym).filter(deferredTx),amt);
+// ym 월에 실제로 통장에서 나가는 돈: 즉시 결제 소비 + 카드 대금 + 저축·상환
+const cashOut=ym=>sum(charges(ym).filter(t=>!deferredTx(t)),amt)+sum(cardPays(ym),amt)+sum(S.deposits.filter(d=>ymOf(d.date)===ym),amt)+sum(S.repays.filter(r=>ymOf(r.date)===ym),amt);
 const savTotal=s=>s.base+sum(S.deposits.filter(d=>d.sid===s.id),amt);
 const loanPaid=l=>sum(S.repays.filter(r=>r.lid===l.id),r=>r.amount-(r.interest||0));
 
@@ -224,7 +241,7 @@ function txItem(t){
 function vHome(){
  const P=getPlan(viewYm),ex=expOf(viewYm),exp=sum(ex,amt),incAct=sum(incOf(viewYm),amt),inc=incAct||P.income;
  const sav=sum(S.deposits.filter(d=>ymOf(d.date)===viewYm),amt),rep=sum(S.repays.filter(r=>ymOf(r.date)===viewYm),amt);
- const left=inc-exp-sav-rep;
+ const left=inc-exp-sav-rep,cpay=cardPays(viewYm),cpayT=sum(cpay,amt),nextT=nextMonthPay(viewYm),leftCash=inc-cashOut(viewYm);
  const cardUse={};ex.forEach(t=>cardUse[t.card]=(cardUse[t.card]||0)+t.amount);
  const cards=S.cards.filter(c=>cardUse[c.id]||P.byCard[c.id]);
  const catUse={};ex.forEach(t=>catUse[t.cat]=(catUse[t.cat]||0)+t.amount);
@@ -233,12 +250,23 @@ function vHome(){
  <div class="card"><div class="row sp"><span class="sub">${ymLabel(viewYm)} 수입</span><button class="btn sm" onclick="openPlan()">예산 편집</button></div>
  <div class="big">${won(inc)}</div>
  <div class="sub">${P.income?'예상 '+won(P.income):'예상 수입 미입력'} · 실제 입금 ${won(incAct)}${P.income&&incAct?` (${incAct>=P.income?'+':'-'}${won(Math.abs(incAct-P.income))})`:''}</div>
- <div class="grid3" style="margin-top:12px"><div><div class="sub">소비 지출</div><b class="exp">${won(exp)}</b></div><div><div class="sub">저축·상환</div><b>${won(sav+rep)}</b></div><div><div class="sub">남는 돈</div><b class="${left<0?'exp':'inc'}">${won(left)}</b></div></div></div>
+ <div class="grid2" style="margin-top:12px"><div><div class="sub">소비 지출</div><b class="exp">${won(exp)}</b></div><div><div class="sub">저축·상환</div><b>${won(sav+rep)}</b></div><div><div class="sub">남는 돈 · 소비 기준</div><b class="${left<0?'exp':'inc'}">${won(left)}</b></div><div><div class="sub">남는 돈 · 출금 기준</div><b class="${leftCash<0?'exp':'inc'}">${won(leftCash)}</b></div></div>
+ <div class="sub" style="margin-top:8px">소비 기준 = 수입 − 이번 달에 쓴 돈 · 출금 기준 = 수입 − 이번 달 통장에서 실제로 나가는 돈(전월 카드값 포함)</div></div>
  <div class="card"><div class="row sp"><b>이번 달 쓸 금액</b><span class="sub">${P.monthly?'예산 '+won(P.monthly):'미설정'}</span></div>
  ${P.monthly?`<div class="big ${exp>P.monthly?'exp':''}">${won(P.monthly-exp)}</div><div class="bar"><i class="${exp>P.monthly?'over':exp/P.monthly>=.8?'warn':''}" style="width:${Math.min(exp/P.monthly*100,100)}%"></i></div><div class="sub" style="margin-top:2px">${won(exp)} 사용 (${Math.round(exp/P.monthly*100)}%)</div>`:'<div class="sub" style="margin-top:6px">예산 편집에서 입력해보세요</div>'}</div>
+ ${cardPayCard(viewYm,cpay,cpayT,nextT)}
  <h2>카테고리별 지출 <span class="sub">${won(exp)}</span></h2><div class="card">${colChart(viewYm)}</div>
  <h2>카드별 사용금액 <span class="sub">(할부 포함)</span></h2><div class="card">${cards.length?cards.map(c=>budRow('card',c.name,cardUse[c.id]||0,P.byCard[c.id]||0)).join(''):'<div class="empty">카드 사용 내역이 없어요</div>'}</div>
  <h2>카테고리별 예산</h2><div class="card">${cats.length?cats.map(c=>budRow(c.icon,c.name,catUse[c.id]||0,P.byCat[c.id]||0)).join(''):'<div class="empty">지출이나 예산이 있는 카테고리가 없어요</div>'}</div>`;
+}
+function cardPayCard(ym,cpay,cpayT,nextT){
+ const cs=S.cards.filter(deferredCard);
+ if(!cs.length)return `<div class="card sub">신용카드에 결제일을 입력하면 카드 대금이 나가는 일정이 여기에 보여요. (관리 → 카드)</div>`;
+ const prev=shiftYm(ym,-1);
+ const rows=cs.map(c=>{const pay=sum(cpay.filter(p=>p.card===c.id),amt),nx=sum(charges(ym).filter(t=>t.card===c.id),amt);
+  return `<div class="item" style="padding:8px 0"><div class="ico">${ic('card')}</div><div class="grow">${esc(c.name)}<div class="sub">결제일 ${c.payDay}일 · ${+prev.slice(5)}월 사용분 ${won(pay)} 출금</div></div><div style="text-align:right"><div class="sub">다음 달 출금 예정</div><b>${won(nx)}</b></div></div>`}).join('');
+ return `<div class="card"><div class="row sp"><b>카드 결제 일정</b><span class="sub">신용카드</span></div>
+ <div class="grid2" style="margin-top:8px"><div><div class="sub">이번 달 출금 (${+prev.slice(5)}월 사용분)</div><b class="exp">${won(cpayT)}</b></div><div><div class="sub">다음 달 출금 예정 (이번 달 사용분)</div><b>${won(nextT)}</b></div></div>${rows}</div>`;
 }
 function openPlan(){
  const P=getPlan(viewYm),e=S.plan[viewYm]||{};
@@ -262,25 +290,28 @@ const WD=['일','월','화','수','목','금','토'];
 function monthEntries(ym){
  const q=F.q.trim(),out=[];
  charges(ym).forEach(t=>out.push({date:t.date,t}));
+ if(!F.cat)cardPays(ym).forEach(pp=>{if(!F.card||F.card===pp.card)out.push({date:pp.date,p:pp})});
  incOf(ym).forEach(t=>{if(!F.card)out.push({date:t.date,t})});
  if(!F.cat&&!F.card){S.deposits.filter(d=>ymOf(d.date)===ym).forEach(d=>out.push({date:d.date,d}));S.repays.filter(r=>ymOf(r.date)===ym).forEach(r=>out.push({date:r.date,r}))}
  return out.filter(e=>{
   if(e.t){if(F.cat&&e.t.cat!==F.cat)return false;if(F.card&&e.t.card!==F.card)return false;if(q&&!((e.t.memo||'').includes(q)||cat(e.t.cat).name.includes(q)))return false}
+  else if(e.p){if(q&&!(cardName(e.p.card)+' 카드 대금').includes(q))return false}
   else if(q){const n=e.d?(S.savings.find(s=>s.id===e.d.sid)||{}).name:(S.loans.find(l=>l.id===e.r.lid)||{}).name;if(!(n||'').includes(q))return false}
   return true}).sort((a,b)=>b.date.localeCompare(a.date));
 }
 function entryRow(e){
  if(e.t)return txItem(e.t);
+ if(e.p){const c=cardOf(e.p.card)||{name:'(삭제됨)'},fut=e.p.date>today();return `<div class="item"><div class="ico">${ic('card')}</div><div class="grow"><div>${esc(c.name)} 카드 대금<span class="tag">${fut?'출금 예정':'출금'}</span></div><div class="sub">${+e.p.prev.slice(5)}월 사용분 · ${esc(accName(e.p.account))}</div></div><b>-${won(e.p.amount)}</b></div>`}
  if(e.d){const s=S.savings.find(x=>x.id===e.d.sid)||{name:'(삭제됨)'};return `<div class="item" onclick="openDeposit('${e.d.sid}','${e.d.id}')"><div class="ico">${ic('coins')}</div><div class="grow"><div>${esc(s.name)}<span class="tag">저축</span></div><div class="sub">${esc(accName(e.d.account))}</div></div><b>-${won(e.d.amount)}</b></div>`}
  const l=S.loans.find(x=>x.id===e.r.lid)||{name:'(삭제됨)'};
  return `<div class="item" onclick="openRepay('${e.r.lid}','${e.r.id}')"><div class="ico">${ic('banknote')}</div><div class="grow"><div>${esc(l.name)}<span class="tag">상환</span></div><div class="sub">${esc(accName(e.r.account))} · 이자 ${won(e.r.interest||0)}</div></div><b>-${won(e.r.amount)}</b></div>`;
 }
 function listBodyHtml(){
  const E=monthEntries(viewYm),isE=e=>e.t&&e.t.type==='exp',isI=e=>e.t&&e.t.type==='inc';
- const ex=sum(E.filter(isE),e=>e.t.amount),inc=sum(E.filter(isI),e=>e.t.amount),sv=sum(E.filter(e=>e.d),e=>e.d.amount)+sum(E.filter(e=>e.r),e=>e.r.amount);
+ const ex=sum(E.filter(isE),e=>e.t.amount),inc=sum(E.filter(isI),e=>e.t.amount),sv=sum(E.filter(e=>e.d),e=>e.d.amount)+sum(E.filter(e=>e.r),e=>e.r.amount),cp=sum(E.filter(e=>e.p),e=>e.p.amount);
  const head=(F.cat||F.card||F.q.trim())
   ?`<div class="card"><div class="row sp"><span class="sub">${E.length}건</span><span><b class="inc">+${won(inc)}</b> &nbsp; <b class="exp">-${won(ex)}</b></span></div></div>`
-  :`<div class="card"><div class="grid2"><div><div class="sub">수입</div><b class="inc">${won(inc)}</b></div><div><div class="sub">소비 지출</div><b class="exp">${won(ex)}</b></div><div><div class="sub">저축·상환</div><b>${won(sv)}</b></div><div><div class="sub">남는 돈</div><b class="${inc-ex-sv<0?'exp':'inc'}">${won(inc-ex-sv)}</b></div></div></div>`;
+  :`<div class="card"><div class="grid2"><div><div class="sub">수입</div><b class="inc">${won(inc)}</b></div><div><div class="sub">소비 지출</div><b class="exp">${won(ex)}</b></div><div><div class="sub">저축·상환</div><b>${won(sv)}</b></div><div><div class="sub">남는 돈</div><b class="${inc-ex-sv<0?'exp':'inc'}">${won(inc-ex-sv)}</b></div></div>${cp?`<div class="sub" style="margin-top:8px">이 달 통장에서 나간 카드 대금 ${won(cp)} (전월 사용분, 소비에는 포함 안 됨)</div>`:''}</div>`;
  const days={};E.forEach(e=>(days[e.date]=days[e.date]||[]).push(e));
  const body=Object.keys(days).sort().reverse().map(d=>{const tot=sum(days[d].filter(isE),e=>e.t.amount);
   return `<div class="card"><div class="row sp" style="margin-bottom:2px"><b>${+d.slice(8)}일 <span class="sub">(${WD[new Date(d+'T00:00:00').getDay()]})</span></b><span class="sub">${tot?'지출 '+won(tot):''}</span></div>${days[d].map(entryRow).join('')}</div>`}).join('');
@@ -368,11 +399,12 @@ function vAssets(){
 function aAcc(){
  const groups={};S.accounts.forEach(a=>(groups[a.purpose||'기타']=groups[a.purpose||'기타']||[]).push(a));
  const m=ymOf(today()),ex=expOf(m);
- return `<div class="card"><div class="sub">전체 잔액</div><div class="big">${won(sum(S.accounts,accBal))}</div></div>
+ const totB=sum(S.accounts,accBal),totU=sum(S.accounts,accUnpaid);
+ return `<div class="card"><div class="sub">전체 은행 잔액 (예상)</div><div class="big">${won(totB)}</div>${totU>0?`<div class="row sp" style="margin-top:8px"><span class="sub">미결제 카드값 (다음 달 이후 출금)</span><b class="exp">-${won(totU)}</b></div><div class="row sp"><span class="sub">카드값 갚고 남는 돈</span><b>${won(totB-totU)}</b></div>`:''}</div>
  <div class="row sp"><h2>통장</h2><button class="btn sm" onclick="openAcc()">+ 통장</button></div>
  ${Object.keys(groups).length?Object.entries(groups).map(([p,arr])=>`<div class="card"><div class="sub" style="margin-bottom:4px">용도 · ${esc(p)} · ${won(sum(arr,accBal))}</div>${arr.map(a=>{
   const mine=ex.filter(t=>t.account===a.id),fx=sum(mine.filter(t=>t.kind==='고정'),amt),cd=sum(mine.filter(t=>t.kind!=='고정'&&cardOf(t.card)&&cardOf(t.card).kind!=='현금'),amt);
-  return `<div class="item" onclick="openAcc('${a.id}')"><div class="ico">${ic('bank')}</div><div class="grow">${esc(a.name)}<div class="sub">${esc(a.bank||'')} 이번 달 고정 ${won(fx)} · 카드 ${won(cd)}</div></div><b>${won(accBal(a))}</b></div>`}).join('')}</div>`).join(''):'<div class="card empty">통장을 추가해보세요</div>'}`;
+  return `<div class="item" onclick="openAcc('${a.id}')"><div class="ico">${ic('bank')}</div><div class="grow">${esc(a.name)}<div class="sub">${esc(a.bank||'')} 이번 달 고정 ${won(fx)} · 카드 ${won(cd)}</div></div><div style="text-align:right"><b>${won(accBal(a))}</b>${accUnpaid(a)>0?`<div class="sub">카드 미결제 -${won(accUnpaid(a))}<br>차감 후 ${won(accBal(a)-accUnpaid(a))}</div>`:''}</div></div>`}).join('')}</div>`).join(''):'<div class="card empty">통장을 추가해보세요</div>'}`;
 }
 function aSav(){
  const items=S.savings.map(s=>{const t=savTotal(s),p=s.target>0?Math.min(t/s.target*100,100):null;
@@ -455,7 +487,7 @@ function txForm(t,ty){
 }
 function initTx(ty,t){txType=ty;txKind=(t&&t.kind)||'변동';if(ty==='exp'){setKind(txKind);cardChanged();instNote()}}
 function setKind(k){txKind=k;[...$('kseg').children].forEach((b,i)=>b.classList.toggle('on',(i===0)===(k==='변동')))}
-function cardChanged(){const c=cardOf($('f_card').value),a=$('f_acc');if(c&&c.account){a.value=c.account;a.disabled=true;$('accNote').textContent='카드 결제 통장에서 차감돼요 (할부는 매월 분할 금액만큼)'}else{a.disabled=false;$('accNote').textContent=''}}
+function cardChanged(){const c=cardOf($('f_card').value),a=$('f_acc');if(c&&c.account){a.value=c.account;a.disabled=true;$('accNote').textContent=deferredCard(c)?c.payDay+'일 결제일에 통장에서 차감돼요 (사용한 달의 다음 달, 할부는 매월 분할 금액만큼)':'카드 결제 통장에서 바로 차감돼요 (할부는 매월 분할 금액만큼)'}else{a.disabled=false;$('accNote').textContent=''}}
 function instNote(){const n=Math.max(1,Math.round(+$('f_mo').value||1)),a=+$('f_amt').value;$('instNote').textContent=n>1&&a>0?`매월 약 ${won(a/n)}씩 ${n}개월간 지출과 카드 사용액에 반영돼요`:''}
 function openTx(id){const t=S.tx.find(x=>x.id===id);modal(`<h1>내역 수정</h1>${txForm(t,t.type)}`);initTx(t.type,t)}
 function saveTx(id,ty){
@@ -516,7 +548,7 @@ function pickIcon(n,b){$('c_i').value=n;document.querySelectorAll('.picker butto
 function saveCat(id){const n=$('c_n').value.trim();if(!n)return;upsert('categories',id,{name:n,icon:$('c_i').value||'box',type:$('c_t').value});done()}
 function openCard(id){
  const c=S.cards.find(x=>x.id===id)||{name:'',kind:'신용',account:'',payDay:''};
- modal(`<h1>${id?'카드 수정':'카드 추가'}</h1>${fld('카드/결제수단 이름',txt('k_n',c.name,'예: 신한 체크'))}${fld('종류',`<select id="k_t">${['신용','체크','현금'].map(x=>`<option ${c.kind===x?'selected':''}>${x}</option>`).join('')}</select>`)}${fld('결제 통장 (사용 즉시 여기서 차감)',accSel('k_a',c.account))}${fld('결제일 (일)',num('k_d',c.payDay))}${foot(id,`saveCard('${id||''}')`,`rm('cards','${id}')`)}`);
+ modal(`<h1>${id?'카드 수정':'카드 추가'}</h1>${fld('카드/결제수단 이름',txt('k_n',c.name,'예: 신한 체크'))}${fld('종류',`<select id="k_t">${['신용','체크','현금'].map(x=>`<option ${c.kind===x?'selected':''}>${x}</option>`).join('')}</select>`)}${fld('결제 통장',accSel('k_a',c.account))}${fld('결제일 (일)',num('k_d',c.payDay))}<div class="sub" style="margin-top:6px">신용카드는 결제일을 입력하면 <b>사용한 달의 다음 달 그 날짜</b>에 결제 통장에서 차감돼요. 비워 두거나 체크·현금이면 사용 즉시 차감돼요.</div>${foot(id,`saveCard('${id||''}')`,`rm('cards','${id}')`)}`);
 }
 function saveCard(id){const n=$('k_n').value.trim();if(!n)return;upsert('cards',id,{name:n,kind:$('k_t').value,account:$('k_a').value,payDay:$('k_d').value});done()}
 function openRec(id){
