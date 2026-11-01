@@ -169,7 +169,7 @@ const daysIn=ym=>new Date(+ym.slice(0,4),+ym.slice(5),0).getDate();
 
 // 할부: 총액을 개월 수로 나눠 매월 분할 반영
 const portion=(t,i)=>{const n=t.months||1;if(n<=1)return t.amount;const p=Math.round(t.amount/n);return i<n-1?p:t.amount-p*(n-1)};
-function charges(ym){const out=[];S.tx.forEach(t=>{if(t.type!=='exp')return;const n=t.months||1,off=monthDiff(ymOf(t.date),ym);if(off>=0&&off<n)out.push({...t,amount:portion(t,off),inst:n>1?(off+1)+'/'+n:'',date:off?ym+'-'+String(Math.min(+t.date.slice(8),daysIn(ym))).padStart(2,'0'):t.date})});return out}
+function charges(ym){const out=[];S.tx.forEach(t=>{if(t.type!=='exp')return;const n=t.months||1,off=monthDiff(ymOf(t.date),ym);if(off>=0&&off<n)out.push({...t,amount:portion(t,off),inst:n>1?(off+1)+'/'+n:'',idx:off,date:off?ym+'-'+String(Math.min(+t.date.slice(8),daysIn(ym))).padStart(2,'0'):t.date})});return out}
 const expOf=charges;
 const incOf=ym=>S.tx.filter(t=>t.type==='inc'&&ymOf(t.date)===ym);
 // 신용카드 + 결제일 입력 시: 사용한 달의 다음 달 결제일에 통장에서 차감 (결제일이 없으면 사용 즉시 차감)
@@ -177,20 +177,21 @@ const deferredCard=c=>!!c&&c.kind==='신용'&&+c.payDay>0;
 const deferredTx=t=>t.type==='exp'&&deferredCard(cardOf(t.card));
 const payDate=(c,ym)=>{const m=shiftYm(ym,1);return m+'-'+String(Math.min(+c.payDay,daysIn(m))).padStart(2,'0')};
 const usedParts=t=>Math.min(t.months||1,Math.max(0,monthDiff(ymOf(t.date),ymOf(today())))+1);
-const usedSum=t=>{const k=usedParts(t);let s=0;for(let i=0;i<k;i++)s+=portion(t,i);return s};
+const pbOf=t=>Math.min(t.paidBefore||0,(t.months||1)-1);
+const usedSum=t=>{const k=usedParts(t);let s=0;for(let i=pbOf(t);i<k;i++)s+=portion(t,i);return s};
 const paidSum=usedSum;
-const settledSum=t=>{if(!deferredTx(t))return usedSum(t);const c=cardOf(t.card),k=usedParts(t),td=today();let s=0;for(let i=0;i<k;i++)if(payDate(c,shiftYm(ymOf(t.date),i))<=td)s+=portion(t,i);return s};
+const settledSum=t=>{if(!deferredTx(t))return usedSum(t);const c=cardOf(t.card),k=usedParts(t),td=today();let s=0;for(let i=pbOf(t);i<k;i++)if(payDate(c,shiftYm(ymOf(t.date),i))<=td)s+=portion(t,i);return s};
 const accBal=a=>a.base+sum(S.tx.filter(t=>t.account===a.id),t=>t.type==='inc'?t.amount:-settledSum(t))-sum(S.deposits.filter(d=>d.account===a.id),amt)-sum(S.repays.filter(r=>r.account===a.id),amt);
 const accUnpaid=a=>sum(S.tx.filter(t=>t.account===a.id&&deferredTx(t)),t=>usedSum(t)-settledSum(t));
 // ym 월에 통장에서 빠지는 신용카드 대금 (전월 사용분)
 function cardPays(ym){
  const prev=shiftYm(ym,-1),by={};
- charges(prev).filter(deferredTx).forEach(t=>{const k=t.card+'|'+t.account;by[k]=by[k]||{card:t.card,account:t.account,amount:0};by[k].amount+=t.amount});
+ charges(prev).filter(t=>deferredTx(t)&&t.idx>=pbOf(t)).forEach(t=>{const k=t.card+'|'+t.account;by[k]=by[k]||{card:t.card,account:t.account,amount:0};by[k].amount+=t.amount});
  return Object.values(by).map(o=>({...o,prev,date:payDate(cardOf(o.card),prev)}));
 }
-const nextMonthPay=ym=>sum(charges(ym).filter(deferredTx),amt);
+const nextMonthPay=ym=>sum(charges(ym).filter(t=>deferredTx(t)&&t.idx>=pbOf(t)),amt);
 // ym 월에 실제로 통장에서 나가는 돈: 즉시 결제 소비 + 카드 대금 + 저축·상환
-const cashOut=ym=>sum(charges(ym).filter(t=>!deferredTx(t)),amt)+sum(cardPays(ym),amt)+sum(S.deposits.filter(d=>ymOf(d.date)===ym),amt)+sum(S.repays.filter(r=>ymOf(r.date)===ym),amt);
+const cashOut=ym=>sum(charges(ym).filter(t=>!deferredTx(t)&&t.idx>=pbOf(t)),amt)+sum(cardPays(ym),amt)+sum(S.deposits.filter(d=>ymOf(d.date)===ym),amt)+sum(S.repays.filter(r=>ymOf(r.date)===ym),amt);
 const savTotal=s=>s.base+sum(S.deposits.filter(d=>d.sid===s.id),amt);
 const loanPaid=l=>sum(S.repays.filter(r=>r.lid===l.id),r=>r.amount-(r.interest||0));
 
@@ -263,7 +264,7 @@ function cardPayCard(ym,cpay,cpayT,nextT){
  const cs=S.cards.filter(deferredCard);
  if(!cs.length)return `<div class="card sub">신용카드에 결제일을 입력하면 카드 대금이 나가는 일정이 여기에 보여요. (관리 → 카드)</div>`;
  const prev=shiftYm(ym,-1);
- const rows=cs.map(c=>{const pay=sum(cpay.filter(p=>p.card===c.id),amt),nx=sum(charges(ym).filter(t=>t.card===c.id),amt);
+ const rows=cs.map(c=>{const pay=sum(cpay.filter(p=>p.card===c.id),amt),nx=sum(charges(ym).filter(t=>t.card===c.id&&t.idx>=pbOf(t)),amt);
   return `<div class="item" style="padding:8px 0"><div class="ico">${ic('card')}</div><div class="grow">${esc(c.name)}<div class="sub">결제일 ${c.payDay}일 · ${+prev.slice(5)}월 사용분 ${won(pay)} 출금</div></div><div style="text-align:right"><div class="sub">다음 달 출금 예정</div><b>${won(nx)}</b></div></div>`}).join('');
  return `<div class="card"><div class="row sp"><b>카드 결제 일정</b><span class="sub">신용카드</span></div>
  <div class="grid2" style="margin-top:8px"><div><div class="sub">이번 달 출금 (${+prev.slice(5)}월 사용분)</div><b class="exp">${won(cpayT)}</b></div><div><div class="sub">다음 달 출금 예정 (이번 달 사용분)</div><b>${won(nextT)}</b></div></div>${rows}</div>`;
@@ -481,19 +482,24 @@ function txForm(t,ty){
  const id=t&&t.id;t=t||{date:today(),kind:'변동',amount:'',months:1,cat:'',card:S.cards[0]&&S.cards[0].id,account:S.accounts[0]&&S.accounts[0].id,memo:''};
  const list=S.categories.filter(c=>c.type===ty);
  return `${fld('금액'+(ty==='exp'&&(t.months||1)>1?' (총액)':''),num('f_amt',t.amount,'0').replace('<input','<input oninput="instNote()"'))}${fld('카테고리',`<select id="f_cat">${opts(list,t.cat||(list[0]&&list[0].id))}</select>`)}${fld('날짜',dat('f_date',t.date))}
- ${ty==='exp'?`${fld('유형','<div class="seg" id="kseg"><button onclick="setKind(\'변동\')">변동</button><button onclick="setKind(\'고정\')">고정</button></div>')}${fld('카드(결제수단)',`<select id="f_card" onchange="cardChanged()">${opts(S.cards,t.card)}</select>`)}${fld('할부 개월 (1 = 일시불)',num('f_mo',t.months||1,'1').replace('<input','<input oninput="instNote()" min="1" max="36"'))}<div class="sub" id="instNote"></div>`:''}
+ ${ty==='exp'?`${fld('유형','<div class="seg" id="kseg"><button onclick="setKind(\'변동\')">변동</button><button onclick="setKind(\'고정\')">고정</button></div>')}${fld('카드(결제수단)',`<select id="f_card" onchange="cardChanged()">${opts(S.cards,t.card)}</select>`)}${fld('할부 개월 (1 = 일시불)',num('f_mo',t.months||1,'1').replace('<input','<input oninput="instNote()" min="1" max="36"'))}<div id="pbRow">${fld('이미 낸 회차 (이미 결제가 끝난 개월 수, 새 할부면 0)',num('f_pb',t.paidBefore||0,'0').replace('<input','<input oninput="instNote()" min="0"'))}</div><div class="sub" id="instNote"></div>`:''}
  ${fld('통장',accSel('f_acc',t.account))}<div class="sub" id="accNote"></div>
  ${fld('메모',txt('f_memo',t.memo,'메모'))}${foot(id,`saveTx('${id||''}','${ty}')`,`rm('tx','${id}')`)}`;
 }
 function initTx(ty,t){txType=ty;txKind=(t&&t.kind)||'변동';if(ty==='exp'){setKind(txKind);cardChanged();instNote()}}
 function setKind(k){txKind=k;[...$('kseg').children].forEach((b,i)=>b.classList.toggle('on',(i===0)===(k==='변동')))}
 function cardChanged(){const c=cardOf($('f_card').value),a=$('f_acc');if(c&&c.account){a.value=c.account;a.disabled=true;$('accNote').textContent=deferredCard(c)?c.payDay+'일 결제일에 통장에서 차감돼요 (사용한 달의 다음 달, 할부는 매월 분할 금액만큼)':'카드 결제 통장에서 바로 차감돼요 (할부는 매월 분할 금액만큼)'}else{a.disabled=false;$('accNote').textContent=''}}
-function instNote(){const n=Math.max(1,Math.round(+$('f_mo').value||1)),a=+$('f_amt').value;$('instNote').textContent=n>1&&a>0?`매월 약 ${won(a/n)}씩 ${n}개월간 지출과 카드 사용액에 반영돼요`:''}
+function instNote(){
+ const n=Math.max(1,Math.round(+$('f_mo').value||1)),a=+$('f_amt').value,pb=Math.max(0,Math.min(n-1,Math.round(+$('f_pb').value||0)));
+ $('pbRow').style.display=n>1?'':'none';
+ $('instNote').textContent=n>1?(a>0?`매월 약 ${won(a/n)}씩 ${n}개월간 소비·예산·카드 사용액에 반영돼요. `:'')+(pb>0?`이미 낸 ${pb}회는 통장 잔액과 카드 결제에서 빼고, 앞으로 낼 ${n-pb}회만 반영해요. (금액은 월 할부금 × 개월 수)`:'금액은 월 할부금 × 개월 수 (이자 포함)로 넣으면 정확해요.'):'';
+}
 function openTx(id){const t=S.tx.find(x=>x.id===id);modal(`<h1>내역 수정</h1>${txForm(t,t.type)}`);initTx(t.type,t)}
 function saveTx(id,ty){
  const amount=+$('f_amt').value;if(!(amount>0))return alert('금액을 입력하세요');
  const c=ty==='exp'?cardOf($('f_card').value):null;
- const v={date:$('f_date').value||today(),type:ty,kind:ty==='exp'?txKind:'',amount,months:ty==='exp'?Math.min(36,Math.max(1,Math.round(+$('f_mo').value||1))):1,cat:$('f_cat').value,card:ty==='exp'?$('f_card').value:'',account:(c&&c.account)||$('f_acc').value,memo:$('f_memo').value.trim()};
+ const mo=ty==='exp'?Math.min(36,Math.max(1,Math.round(+$('f_mo').value||1))):1,pb=ty==='exp'?Math.max(0,Math.min(mo-1,Math.round(+$('f_pb').value||0))):0;
+ const v={date:$('f_date').value||today(),type:ty,kind:ty==='exp'?txKind:'',amount,months:mo,paidBefore:pb,cat:$('f_cat').value,card:ty==='exp'?$('f_card').value:'',account:(c&&c.account)||$('f_acc').value,memo:$('f_memo').value.trim()};
  upsert('tx',id,v);save();closeM();render();
  if(ty==='exp'&&ymOf(v.date)===ymOf(today())){const a=alerts(ymOf(v.date));if(a)setTimeout(()=>alert(a.replace(/<[^>]+>/g,'\n').replace(/\n+/g,'\n').trim()),50)}
 }
