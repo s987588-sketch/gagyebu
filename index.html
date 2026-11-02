@@ -404,7 +404,7 @@ function aAcc(){
  return `<div class="card"><div class="sub">전체 은행 잔액 (예상)</div><div class="big">${won(totB)}</div>${totU>0?`<div class="row sp" style="margin-top:8px"><span class="sub">미결제 카드값 (다음 달 이후 출금)</span><b class="exp">-${won(totU)}</b></div><div class="row sp"><span class="sub">카드값 갚고 남는 돈</span><b>${won(totB-totU)}</b></div>`:''}</div>
  <div class="row sp"><h2>통장</h2><button class="btn sm" onclick="openAcc()">+ 통장</button></div>
  ${Object.keys(groups).length?Object.entries(groups).map(([p,arr])=>`<div class="card"><div class="sub" style="margin-bottom:4px">용도 · ${esc(p)} · ${won(sum(arr,accBal))}</div>${arr.map(a=>{
-  const mine=ex.filter(t=>t.account===a.id),fx=sum(mine.filter(t=>t.kind==='고정'),amt),cd=sum(mine.filter(t=>t.kind!=='고정'&&cardOf(t.card)&&cardOf(t.card).kind!=='현금'),amt);
+  const mine=ex.filter(t=>t.account===a.id),fx=sum(mine.filter(t=>t.kind==='고정'),amt),cd=sum(mine.filter(t=>t.kind!=='고정'&&cardOf(t.card)&&!['현금','계좌이체'].includes(cardOf(t.card).kind)),amt);
   return `<div class="item" onclick="openAcc('${a.id}')"><div class="ico">${ic('bank')}</div><div class="grow">${esc(a.name)}<div class="sub">${esc(a.bank||'')} 이번 달 고정 ${won(fx)} · 카드 ${won(cd)}</div></div><div style="text-align:right"><b>${won(accBal(a))}</b>${accUnpaid(a)>0?`<div class="sub">카드 미결제 -${won(accUnpaid(a))}<br>차감 후 ${won(accBal(a)-accUnpaid(a))}</div>`:''}</div></div>`}).join('')}</div>`).join(''):'<div class="card empty">통장을 추가해보세요</div>'}`;
 }
 function aSav(){
@@ -482,13 +482,18 @@ function txForm(t,ty){
  const id=t&&t.id;t=t||{date:today(),kind:'변동',amount:'',months:1,cat:'',card:S.cards[0]&&S.cards[0].id,account:S.accounts[0]&&S.accounts[0].id,memo:''};
  const list=S.categories.filter(c=>c.type===ty);
  return `${fld('금액'+(ty==='exp'&&(t.months||1)>1?' (총액)':''),num('f_amt',t.amount,'0').replace('<input','<input oninput="instNote()"'))}${fld('카테고리',`<select id="f_cat">${opts(list,t.cat||(list[0]&&list[0].id))}</select>`)}${fld('날짜',dat('f_date',t.date))}
- ${ty==='exp'?`${fld('유형','<div class="seg" id="kseg"><button onclick="setKind(\'변동\')">변동</button><button onclick="setKind(\'고정\')">고정</button></div>')}${fld('카드(결제수단)',`<select id="f_card" onchange="cardChanged()">${opts(S.cards,t.card)}</select>`)}${fld('할부 개월 (1 = 일시불)',num('f_mo',t.months||1,'1').replace('<input','<input oninput="instNote()" min="1" max="36"'))}<div id="pbRow">${fld('이미 낸 회차 (이미 결제가 끝난 개월 수, 새 할부면 0)',num('f_pb',t.paidBefore||0,'0').replace('<input','<input oninput="instNote()" min="0"'))}</div><div class="sub" id="instNote"></div>`:''}
+ ${ty==='exp'?`${fld('유형','<div class="seg" id="kseg"><button onclick="setKind(\'변동\')">변동</button><button onclick="setKind(\'고정\')">고정</button></div>')}${fld('카드(결제수단)',`<select id="f_card" onchange="cardChanged(true)">${opts(S.cards,t.card)}</select>`)}${fld('할부 개월 (1 = 일시불)',num('f_mo',t.months||1,'1').replace('<input','<input oninput="instNote()" min="1" max="36"'))}<div id="pbRow">${fld('이미 낸 회차 (이미 결제가 끝난 개월 수, 새 할부면 0)',num('f_pb',t.paidBefore||0,'0').replace('<input','<input oninput="instNote()" min="0"'))}</div><div class="sub" id="instNote"></div>`:''}
  ${fld('통장',accSel('f_acc',t.account))}<div class="sub" id="accNote"></div>
  ${fld('메모',txt('f_memo',t.memo,'메모'))}${foot(id,`saveTx('${id||''}','${ty}')`,`rm('tx','${id}')`)}`;
 }
-function initTx(ty,t){txType=ty;txKind=(t&&t.kind)||'변동';if(ty==='exp'){setKind(txKind);cardChanged();instNote()}}
+function initTx(ty,t){txType=ty;txKind=(t&&t.kind)||'변동';if(ty==='exp'){setKind(txKind);cardChanged(!t);instNote()}}
 function setKind(k){txKind=k;[...$('kseg').children].forEach((b,i)=>b.classList.toggle('on',(i===0)===(k==='변동')))}
-function cardChanged(){const c=cardOf($('f_card').value),a=$('f_acc');if(c&&c.account){a.value=c.account;a.disabled=true;$('accNote').textContent=deferredCard(c)?c.payDay+'일 결제일에 통장에서 차감돼요 (사용한 달의 다음 달, 할부는 매월 분할 금액만큼)':'카드 결제 통장에서 바로 차감돼요 (할부는 매월 분할 금액만큼)'}else{a.disabled=false;$('accNote').textContent=''}}
+function cardChanged(set){
+ const c=cardOf($('f_card').value),a=$('f_acc'),n=$('accNote');
+ a.disabled=false;
+ if(c&&c.account){if(set)a.value=c.account;n.textContent=deferredCard(c)?c.payDay+'일 결제일에 이 통장에서 차감돼요 (사용한 달의 다음 달, 할부는 매월 분할 금액만큼). 통장은 바꿀 수 있어요.':'카드의 결제 통장이 기본으로 선택돼요. 다른 통장이면 바꿔 주세요.'}
+ else n.textContent=c&&c.kind==='계좌이체'?'출금한 통장을 선택하세요.':'';
+}
 function instNote(){
  const n=Math.max(1,Math.round(+$('f_mo').value||1)),a=+$('f_amt').value,pb=Math.max(0,Math.min(n-1,Math.round(+$('f_pb').value||0)));
  $('pbRow').style.display=n>1?'':'none';
@@ -499,7 +504,7 @@ function saveTx(id,ty){
  const amount=+$('f_amt').value;if(!(amount>0))return alert('금액을 입력하세요');
  const c=ty==='exp'?cardOf($('f_card').value):null;
  const mo=ty==='exp'?Math.min(36,Math.max(1,Math.round(+$('f_mo').value||1))):1,pb=ty==='exp'?Math.max(0,Math.min(mo-1,Math.round(+$('f_pb').value||0))):0;
- const v={date:$('f_date').value||today(),type:ty,kind:ty==='exp'?txKind:'',amount,months:mo,paidBefore:pb,cat:$('f_cat').value,card:ty==='exp'?$('f_card').value:'',account:(c&&c.account)||$('f_acc').value,memo:$('f_memo').value.trim()};
+ const v={date:$('f_date').value||today(),type:ty,kind:ty==='exp'?txKind:'',amount,months:mo,paidBefore:pb,cat:$('f_cat').value,card:ty==='exp'?$('f_card').value:'',account:$('f_acc').value,memo:$('f_memo').value.trim()};
  upsert('tx',id,v);save();closeM();render();
  if(ty==='exp'&&ymOf(v.date)===ymOf(today())){const a=alerts(ymOf(v.date));if(a)setTimeout(()=>alert(a.replace(/<[^>]+>/g,'\n').replace(/\n+/g,'\n').trim()),50)}
 }
@@ -554,7 +559,7 @@ function pickIcon(n,b){$('c_i').value=n;document.querySelectorAll('.picker butto
 function saveCat(id){const n=$('c_n').value.trim();if(!n)return;upsert('categories',id,{name:n,icon:$('c_i').value||'box',type:$('c_t').value});done()}
 function openCard(id){
  const c=S.cards.find(x=>x.id===id)||{name:'',kind:'신용',account:'',payDay:''};
- modal(`<h1>${id?'카드 수정':'카드 추가'}</h1>${fld('카드/결제수단 이름',txt('k_n',c.name,'예: 신한 체크'))}${fld('종류',`<select id="k_t">${['신용','체크','현금'].map(x=>`<option ${c.kind===x?'selected':''}>${x}</option>`).join('')}</select>`)}${fld('결제 통장',accSel('k_a',c.account))}${fld('결제일 (일)',num('k_d',c.payDay))}<div class="sub" style="margin-top:6px">신용카드는 결제일을 입력하면 <b>사용한 달의 다음 달 그 날짜</b>에 결제 통장에서 차감돼요. 비워 두거나 체크·현금이면 사용 즉시 차감돼요.</div>${foot(id,`saveCard('${id||''}')`,`rm('cards','${id}')`)}`);
+ modal(`<h1>${id?'카드 수정':'카드 추가'}</h1>${fld('카드/결제수단 이름',txt('k_n',c.name,'예: 신한 체크'))}${fld('종류',`<select id="k_t">${['신용','체크','현금','계좌이체'].map(x=>`<option ${c.kind===x?'selected':''}>${x}</option>`).join('')}</select>`)}${fld('결제 통장',accSel('k_a',c.account))}${fld('결제일 (일)',num('k_d',c.payDay))}<div class="sub" style="margin-top:6px">신용카드는 결제일을 입력하면 <b>사용한 달의 다음 달 그 날짜</b>에 결제 통장에서 차감돼요. 비워 두거나 체크·현금이면 사용 즉시 차감돼요.<br>결제 통장이 매번 다른 결제수단(예: 계좌이체)은 종류를 <b>계좌이체</b>로 하고 결제 통장을 비워 두세요. 입력할 때마다 통장을 고를 수 있어요.</div>${foot(id,`saveCard('${id||''}')`,`rm('cards','${id}')`)}`);
 }
 function saveCard(id){const n=$('k_n').value.trim();if(!n)return;upsert('cards',id,{name:n,kind:$('k_t').value,account:$('k_a').value,payDay:$('k_d').value});done()}
 function openRec(id){
