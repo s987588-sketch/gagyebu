@@ -451,7 +451,8 @@ function vSet(){
  ${sec(ic('card',18,'in')+' 카드','openCard()',S.cards.map(c=>`<div class="item" onclick="openCard('${c.id}')"><div class="ico">${ic('card')}</div><div class="grow">${esc(c.name)}<div class="sub">${esc(c.kind)} · 결제 통장 ${esc(accName(c.account))}${c.payDay?' · 결제일 '+c.payDay+'일':''}</div></div></div>`).join(''))}
  ${sec(ic('tag',18,'in')+' 카테고리','openCat()',S.categories.map(c=>`<div class="item" onclick="openCat('${c.id}')"><div class="ico">${ic(c.icon)}</div><div class="grow">${esc(c.name)}</div><span class="sub">${c.type==='inc'?'수입':'지출'}</span></div>`).join(''))}
  ${sec(ic('bank',18,'in')+' 통장','openAcc()',S.accounts.map(a=>`<div class="item" onclick="openAcc('${a.id}')"><div class="ico">${ic('bank')}</div><div class="grow">${esc(a.name)}<div class="sub">${esc(a.bank||'')} ${esc(a.purpose||'')}</div></div></div>`).join(''))}
- ${sec(ic('save',18,'in')+' 데이터 백업','',`<div class="row"><button class="btn" onclick="exportData()">내보내기</button><button class="btn ghost" onclick="$('imp').click()">가져오기</button><input id="imp" type="file" accept=".json" hidden onchange="importData(this.files[0])"></div><div class="sub" style="margin-top:8px">브라우저에만 저장돼요. 기기 변경 시 사용하세요. (구글 시트 연동은 나중에)</div>`)}`;
+ ${sec(ic('save',18,'in')+' 데이터 백업·삭제','',`<div class="row"><button class="btn" onclick="exportData()">내보내기</button><button class="btn ghost" onclick="$('imp').click()">가져오기</button><input id="imp" type="file" accept=".json" hidden onchange="importData(this.files[0])"></div><div class="sub" style="margin-top:8px">현재 데이터 전체를 파일로 내려받거나, 내려받은 파일로 되돌릴 수 있어요.</div>
+ <div style="margin-top:14px"><button class="btn del" onclick="clearTx()">지출·수입 내역 전체 삭제</button></div><div class="sub" style="margin-top:6px">지출·수입 내역만 지워요. 저축 납입·대출 상환 기록, 예산, 통장·카드·카테고리·고정 지출 설정은 남아요.</div>`)}`;
 }
 
 // ---- 모달 ----
@@ -568,6 +569,14 @@ function openRec(id){
 }
 function saveRec(id){const n=$('r_n').value.trim(),a=+$('r_a').value;if(!n||!(a>0))return alert('이름과 금액을 입력하세요');const v={name:n,amount:a,day:Math.min(Math.max(+$('r_d').value||1,1),31),cat:$('r_c').value,card:$('r_k').value,account:$('r_acc').value};const o=S.recurring.find(x=>x.id===id);if(o)Object.assign(o,v);else S.recurring.push({id:uid(),lastYm:'',...v});save();applyRecurring();closeM();render()}
 
+function clearTx(){
+ const n=S.tx.length;
+ if(!n)return alert('지울 지출·수입 내역이 없어요.');
+ if(!confirm(`지출·수입 내역 ${n}건을 모두 삭제할까요?\n이 기기와 구글 드라이브에서 함께 지워지고 되돌릴 수 없어요.`))return;
+ if(confirm('삭제하기 전에 백업 파일을 내려받을까요? (권장)'))exportData();
+ S.tx=[];save();render();
+ alert('지출·수입 내역을 삭제했어요.'+(SY.enabled?' 왼쪽 아래가 "저장됨"으로 바뀌면 드라이브에도 반영된 거예요.':''));
+}
 function exportData(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(S,null,1)],{type:'application/json'}));a.download='gagyebu-'+today()+'.json';a.click()}
 function importData(f){if(!f)return;const r=new FileReader();r.onload=()=>{try{const d=JSON.parse(r.result);if(!d.tx||!d.categories)throw 0;if(!confirm('현재 데이터를 덮어쓸까요?'))return;S=Object.assign(clone(DEF),d);save();render()}catch(e){alert('올바른 백업 파일이 아니에요')}};r.readAsText(f)}
 
